@@ -161,7 +161,10 @@ def ask_combo():
 def divide_combo(combofile,num):
     #if os.path.getsize(combofile)<BUFFER:
     if True:
-        combo = open(combofile).read().split("\n")
+        try:
+            combo = open(combofile).read().split("\n")
+        except UnicodeDecodeError:
+            return -1
         min_combo_size = int(len(combo)/num)
         final = list()
         for i in range(num):
@@ -172,12 +175,13 @@ def divide_combo(combofile,num):
             return final
         else:
             for i in range(len(combo)):
-                final[i].append(combo[i])
+                if combo[i].count(":") == 1:
+                    final[i].append(combo[i])
             return final
 
     else:
         pass
-        #TODO find a method for loading large files
+        #TODO find a method to load larger files
 
 def threadhandler(comboID):
     global combo
